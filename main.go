@@ -1,82 +1,72 @@
 package main
 
 import (
+	"context"
 	"log"
 	"os"
-	"strconv"
+	"time"
 
+	"github.com/bankptrk/react-go/handlers"
 	"github.com/gofiber/fiber/v2"
 	"github.com/joho/godotenv"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/mongo/readpref"
 )
 
-type Todo struct {
-	ID        int    `json:"id"`
-	Completed bool   `json:"completed"`
-	Body      string `json:"body"`
-}
+var collection *mongo.Collection
 
 func main() {
-	app := fiber.New()
-
 	err := godotenv.Load(".env")
 	if err != nil {
-		log.Fatal("Erorr loading .env file")
+		log.Fatal("Error loading .env file")
+	}
+	MONGODB_URL := os.Getenv("MONGODB_URL")
+	if MONGODB_URL == "" {
+		log.Fatal("MONGODB_URL environment variable is not set")
 	}
 
-	PORT := os.Getenv("PORT")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
-	todos := []Todo{}
+	clientOption := options.Client().ApplyURI(MONGODB_URL)
+	client, err := mongo.Connect(ctx, clientOption)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer func() {
+		if err := client.Disconnect(ctx); err != nil {
+			log.Fatal(err)
+		}
+	}()
+
+	if err := client.Ping(ctx, readpref.Primary()); err != nil {
+		log.Fatal(err)
+	}
+
+	log.Println("Connected to MongoDB!")
+
+	collection = client.Database("golang_db").Collection("todos")
+
+	app := fiber.New()
 
 	app.Get("/api/todos", func(c *fiber.Ctx) error {
-		return c.Status(200).JSON(todos)
+		return handlers.GetTodos(c, collection)
 	})
-
 	app.Post("/api/todos", func(c *fiber.Ctx) error {
-		todo := &Todo{}
-
-		if err := c.BodyParser(todo); err != nil {
-			return err
-		}
-
-		if todo.Body == "" {
-			return c.Status(400).JSON(fiber.Map{"error": "Todo body is required"})
-		}
-
-		todo.ID = len(todos) + 1
-		todos = append(todos, *todo)
-
-		return c.Status(201).JSON(todo)
+		return handlers.CreateTodo(c, collection)
 	})
-
 	app.Put("/api/todos/:id", func(c *fiber.Ctx) error {
-		id, err := strconv.Atoi(c.Params("id"))
-		if err != nil {
-			return c.Status(400).JSON(fiber.Map{"error": "Invalid ID"})
-		}
-
-		for i, todo := range todos {
-			if todo.ID == id {
-				todos[i].Completed = true
-				return c.Status(200).JSON(todos[i])
-			}
-		}
-
-		return c.Status(404).JSON(fiber.Map{"error": "Todo not found"})
+		return handlers.UpdateTodo(c, collection)
 	})
-
 	app.Delete("/api/todos/:id", func(c *fiber.Ctx) error {
-		id, err := strconv.Atoi(c.Params("id"))
-		if err != nil {
-			return c.Status(400).JSON(fiber.Map{"error": "Invalid ID"})
-		}
-		for i, todo := range todos {
-			if todo.ID == id {
-				todos = append(todos[:i], todos[i+1:]...)
-				return c.Status(200).JSON(fiber.Map{"message": "Deleted successfully"})
-			}
-		}
-		return c.Status(404).JSON(fiber.Map{"error": "Todo not found"})
+		return handlers.DeleteTodo(c, collection)
 	})
 
-	log.Fatal(app.Listen(":" + PORT))
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "3000"
+	}
+
+	log.Fatal(app.Listen("0.0.0.0:" + port))
 }

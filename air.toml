@@ -4,8 +4,7 @@ tmp_dir = "tmp"
 
 [build]
 bin = "tmp/main"
-cmd = "go build -o ${bin} ./..."
-include_ext = ["go"]
-exclude_dir = ["tmp", "vendor"]
-include_dir = ["."]
-watch_dir = ["."]
+cmd = "go build -o {{.Output}} {{.Input}}"
+exclue = ["tmp/*", "client/*"]
+include = ["**/*.go"]
+ignore = ["tmp/*"]
